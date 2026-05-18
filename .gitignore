@@ -1,0 +1,18 @@
+.venv/
+__pycache__/
+*.pyc
+.env
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.idea/
+.vscode/
+
+# Modèles entraînés et données — régénérables
+src/models/store/*.joblib
+src/models/store/index.json
+data/training.csv
+
+# Notebooks Jupyter
+notebooks/.ipynb_checkpoints/
