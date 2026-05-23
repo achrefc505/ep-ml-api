@@ -12,9 +12,20 @@ def _setup_logging():
     logger.add(sys.stderr, level=settings.log_level, colorize=True)
 
 
+def _fix_console_encoding():
+    """Force UTF-8 on Windows consoles that default to cp1252."""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            try:
+                stream.reconfigure(encoding="utf-8", errors="replace")
+            except Exception:
+                pass
+
+
 @click.group()
 def cli():
     """ep-ml-api — prédiction prix d'adjudication."""
+    _fix_console_encoding()
     _setup_logging()
 
 
