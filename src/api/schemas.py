@@ -17,6 +17,10 @@ class PredictRequest(BaseModel):
             "rooms": 3,
             "initial_price": 185000,
             "adjudication_date": "2026-06-15",
+            "postal_code": "75011",
+            "latitude": 48.8593,
+            "longitude": 2.3789,
+            "address": "14 rue de la Roquette, 75011 Paris"
         }
     })
 
@@ -28,6 +32,16 @@ class PredictRequest(BaseModel):
     rooms: int = Field(0, ge=0, le=20, description="Nombre de pièces")
     initial_price: float = Field(..., gt=0, description="Mise à prix (€)")
     adjudication_date: Optional[date] = Field(None, description="Date prévue de la vente")
+
+    # Localisation fine (v2) — CRITIQUE pour Paris/Lyon/Marseille
+    postal_code: Optional[str] = Field(
+        None, description="Code postal (ex: '75011'). Discrimine fortement les prix intra-ville."
+    )
+    latitude: Optional[float] = Field(None, ge=-90, le=90)
+    longitude: Optional[float] = Field(None, ge=-180, le=180)
+    address: Optional[str] = Field(
+        None, description="Adresse complète (informatif, peut servir au géocodage côté serveur si lat/lng absents)"
+    )
 
 
 class PredictResponse(BaseModel):

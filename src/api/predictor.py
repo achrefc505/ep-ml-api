@@ -85,6 +85,15 @@ class ModelRegistry:
         if artifact is None:
             raise FileNotFoundError("Aucun modèle global entraîné. Lance `python -m src.training.train`.")
 
+        # Détection modèle obsolète (features changent entre versions)
+        from ..features.build import FEATURES_VERSION
+        stored_ver = artifact.get("features_version")
+        if stored_ver != FEATURES_VERSION:
+            raise RuntimeError(
+                f"Modèle obsolète : features_version='{stored_ver}' mais le code attend '{FEATURES_VERSION}'. "
+                f"Ré-entraîne avec : python -m src.cli train"
+            )
+
         # Build features
         df = pd.DataFrame([payload])
         df = build_features(df, training=False)
