@@ -45,7 +45,19 @@ pip install -r requirements.txt
 cp .env.example .env
 ```
 
-## Démarrage rapide (en 3 commandes)
+## 🚀 Démarrage automatique en local (Windows)
+
+**Une seule commande** depuis le repo cloné :
+
+```powershell
+.\scripts\setup-local.ps1
+```
+
+Le script crée le `.venv`, installe les deps, configure `.env`, vérifie SQL Server,
+entraîne les modèles et démarre l'API. Voir [`scripts/README.md`](scripts/README.md)
+pour les options.
+
+## Démarrage manuel (en 3 commandes)
 
 ```bash
 # 1. Génère 5000 lignes de données synthétiques réalistes (calibrées par tribunal)

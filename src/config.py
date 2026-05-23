@@ -12,7 +12,7 @@ class Settings(BaseSettings):
         extra="ignore",
     )
 
-    data_source: str = "csv"  # 'csv' | 'sql'
+    data_source: str = "csv"  # 'csv' | 'sql' | 'hybrid'
     training_csv_path: str = "data/training.csv"
 
     db_server: str = "(localdb)\\mssqllocaldb"
@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     db_password: str | None = None
 
     models_dir: str = "src/models/store"
-    min_samples_per_tribunal: int = 30
+    min_samples_per_tribunal: int = 20  # seuil réduit pour datasets de démarrage
 
     rf_n_estimators: int = 200
     rf_max_depth: int = 20
