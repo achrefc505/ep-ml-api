@@ -14,6 +14,42 @@ from loguru import logger
 from ..config import settings
 
 
+def normalize_tribunal(name: str | None) -> str:
+    """Mappe les variantes vers le nom canonical du tribunal.
+
+    Exemples :
+      'Tribunal Judiciaire de Paris' → 'TJ Paris'
+      'TJ de Lyon'                   → 'TJ Lyon'
+      'tj paris'                     → 'TJ Paris'
+      'TGI Marseille' (ancien nom)   → 'TJ Marseille'
+    """
+    if not name or str(name).strip().lower() in {"", "unknown", "nan", "none"}:
+        return "Unknown"
+    import re as _re
+
+    s = str(name).strip()
+    # Normalise espaces
+    s = _re.sub(r"\s+", " ", s)
+    # Retire variantes "Tribunal Judiciaire de", "TGI", "TJ de"
+    patterns = [
+        (r"^Tribunal\s+Judiciaire\s+de\s+", "TJ "),
+        (r"^Tribunal\s+Judiciaire\s+d['']", "TJ "),
+        (r"^Tribunal\s+Judiciaire\s+", "TJ "),
+        (r"^TGI\s+", "TJ "),                # ancienne dénomination
+        (r"^TJ\s+de\s+", "TJ "),
+        (r"^TJ\s+d['']", "TJ "),
+        (r"^Cour\s+d['']?[Aa]ppel\s+de\s+", "CA "),
+    ]
+    for pat, repl in patterns:
+        s = _re.sub(pat, repl, s, flags=_re.IGNORECASE)
+    # Casse standardisée : 'TJ ' + Nom propre
+    if s.lower().startswith("tj "):
+        rest = s[3:].strip()
+        # Titre case sur la partie ville
+        s = "TJ " + rest[:1].upper() + rest[1:] if rest else "TJ Unknown"
+    return s
+
+
 REQUIRED_COLUMNS = [
     "tribunal",
     "city",
@@ -99,7 +135,17 @@ def _load_from_sql() -> pd.DataFrame:
 
 
 def _load_hybrid() -> pd.DataFrame:
-    """Charge SQL en priorité, complète avec synthétique si trop peu."""
+    """Charge SQL en priorité, complète avec synthétique INTELLIGEMMENT.
+
+    Stratégie par tribunal : on garde les vraies données pures pour les
+    tribunaux qui ont déjà >= MIN_SAMPLES_PER_TRIBUNAL lignes réelles
+    (sinon le synthétique pollue le signal local).
+
+    Pour les tribunaux insuffisants : on ajoute du synthétique CIBLÉ
+    (uniquement les villes manquantes) pour entraîner le modèle global.
+    """
+    from ..config import settings as _settings
+
     try:
         real = _load_from_sql()
     except Exception as e:
@@ -107,8 +153,20 @@ def _load_hybrid() -> pd.DataFrame:
         return _load_from_csv()
 
     if len(real) >= HYBRID_MIN_REAL:
-        logger.info("Hybride : {} lignes réelles suffisent (seuil={})", len(real), HYBRID_MIN_REAL)
+        logger.info("Hybride : {} lignes réelles ≥ seuil {} → pas de synthétique", len(real), HYBRID_MIN_REAL)
         return real
+
+    # Détermine quels tribunaux ont assez de vraies données
+    from .loader import normalize_tribunal as _norm
+    real["tribunal"] = real["tribunal"].fillna("Unknown").astype(str).apply(_norm)
+    real_counts = real["tribunal"].value_counts()
+    well_covered = set(real_counts[real_counts >= _settings.min_samples_per_tribunal].index)
+    if well_covered:
+        logger.info(
+            "Hybride : {} tribunaux bien couverts (>= {}) → exclus du synthétique : {}",
+            len(well_covered), _settings.min_samples_per_tribunal,
+            ", ".join(sorted(well_covered)),
+        )
 
     try:
         synth = _load_from_csv()
@@ -118,9 +176,16 @@ def _load_hybrid() -> pd.DataFrame:
         synth = generate(n_rows=5000)
         synth["__source__"] = "csv"
 
+    # Filtre le synthétique : on retire les tribunaux que les vraies données couvrent déjà
+    if "tribunal" in synth.columns and well_covered:
+        before = len(synth)
+        synth["tribunal"] = synth["tribunal"].astype(str).apply(_norm)
+        synth = synth[~synth["tribunal"].isin(well_covered)]
+        logger.info("Hybride : synthétique filtré {} → {} lignes", before, len(synth))
+
     logger.info(
-        "Hybride : {} réel + {} synthétique = {} total",
-        len(real), len(synth), len(real) + len(synth),
+        "Hybride final : {} réel (purs sur tribunaux couverts) + {} synthétique",
+        len(real), len(synth),
     )
     return pd.concat([real, synth], ignore_index=True)
 
@@ -144,6 +209,7 @@ def _clean(df: pd.DataFrame) -> pd.DataFrame:
 
     # Defaults pour les colonnes critiques
     df["tribunal"] = df["tribunal"].fillna("Unknown").astype(str).str.strip()
+    df["tribunal"] = df["tribunal"].apply(normalize_tribunal)
     df["city"] = df["city"].fillna("Unknown").astype(str).str.strip()
     df["region"] = df["region"].fillna("Unknown").astype(str).str.strip()
     df["property_type"] = df["property_type"].fillna("Appartement").astype(str).str.strip()

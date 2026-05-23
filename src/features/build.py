@@ -18,7 +18,7 @@ import re
 import pandas as pd
 import numpy as np
 
-FEATURES_VERSION = "v3"
+FEATURES_VERSION = "v4"
 
 NUMERIC_FEATURES = [
     "surface",
@@ -27,11 +27,18 @@ NUMERIC_FEATURES = [
     "price_per_sqm_initial",
     "log_initial_price",
     "surface_per_room",
+    # v4 : ancrage marché (énorme impact pour Paris/zones premium)
+    "price_per_sqm_bench",       # prix marché €/m² depuis lookup CP
+    "implied_market_value",      # surface × price_per_sqm_bench
+    "initial_vs_bench_ratio",    # mise à prix / valeur marché — signal de décote
+    # Temporel
     "year",
     "month",
+    # Géo
     "latitude",
     "longitude",
     "arrondissement",
+    # Description quali
     "floor_num",
     "dpe_ordinal",
     "has_balcony",
@@ -39,6 +46,12 @@ NUMERIC_FEATURES = [
     "has_elevator",
     "is_renovated",
     "is_rented",
+    # v4 : signaux de standing
+    "is_haussmannien",
+    "has_cheminee",
+    "has_bureau",
+    "has_dressing",
+    "has_cellar",
 ]
 
 CATEGORICAL_FEATURES = [
@@ -157,6 +170,17 @@ _RE_ELEVATOR = re.compile(r"\b(?:ascenseur|élévateur)s?\b", re.IGNORECASE)
 _RE_RENOVATED = re.compile(r"\b(?:rénov[ée]e?s?|refait|neuf|neuve|moderne|moderniser?)\b", re.IGNORECASE)
 _RE_RENTED = re.compile(r"\b(?:lou[ée]|occup[ée]e?|locataire|bail|baux|en\s+place)\b", re.IGNORECASE)
 
+# v4 — signaux haussmannien / standing
+_RE_HAUSSMANNIEN = re.compile(
+    r"\b(?:haussmannien|pierre\s+de\s+taille|moulures?|parquet\s+(?:point|chevron)|"
+    r"versailles|porte\s+coch[ée]re)\b",
+    re.IGNORECASE,
+)
+_RE_CHEMINEE = re.compile(r"\b(?:chemin[ée]e|foyer)\b", re.IGNORECASE)
+_RE_BUREAU = re.compile(r"\b(?:bureau|biblioth[èe]que)\b", re.IGNORECASE)
+_RE_DRESSING = re.compile(r"\b(?:dressing|penderie)\b", re.IGNORECASE)
+_RE_CELLAR = re.compile(r"\b(?:cave|cellier)\b", re.IGNORECASE)
+
 _DPE_TO_ORDINAL = {"A": 7, "B": 6, "C": 5, "D": 4, "E": 3, "F": 2, "G": 1}
 
 
@@ -265,6 +289,22 @@ def build_features(df: pd.DataFrame, *, training: bool = True) -> pd.DataFrame:
     out["has_elevator"] = description.apply(lambda t: _has_keyword(t, _RE_ELEVATOR))
     out["is_renovated"] = description.apply(lambda t: _has_keyword(t, _RE_RENOVATED))
     out["is_rented"] = description.apply(lambda t: _has_keyword(t, _RE_RENTED))
+
+    # v4 — Signaux standing / haussmannien
+    out["has_cheminee"] = description.apply(lambda t: _has_keyword(t, _RE_CHEMINEE))
+    out["has_bureau"] = description.apply(lambda t: _has_keyword(t, _RE_BUREAU))
+    out["has_dressing"] = description.apply(lambda t: _has_keyword(t, _RE_DRESSING))
+    out["has_cellar"] = description.apply(lambda t: _has_keyword(t, _RE_CELLAR))
+    # is_haussmannien = explicite OU faisceau d'indices (cheminée + bureau OU dressing + standing)
+    explicit_h = description.apply(lambda t: _has_keyword(t, _RE_HAUSSMANNIEN))
+    bundle = ((out["has_cheminee"] == 1) & ((out["has_bureau"] == 1) | (out["has_dressing"] == 1)))
+    out["is_haussmannien"] = ((explicit_h == 1) | bundle).astype(int)
+
+    # v4 — Ancrage marché (énorme impact pour Paris/zones premium)
+    from .market_price import lookup_market_price_per_sqm
+    out["price_per_sqm_bench"] = out["postal_code"].apply(lookup_market_price_per_sqm).astype(float)
+    out["implied_market_value"] = out["price_per_sqm_bench"] * out["surface"]
+    out["initial_vs_bench_ratio"] = out["initial_price"] / out["implied_market_value"].clip(lower=1)
 
     # Géo lat/lng — imputation depuis postal_code (full) ou centroïde dept
     from .location import lookup_latlng

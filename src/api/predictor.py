@@ -74,7 +74,13 @@ class ModelRegistry:
 
     def predict(self, payload: dict) -> dict:
         # Choix du modèle : tribunal-spécifique sinon global
-        tribunal = payload.get("tribunal", "")
+        # Normalise le nom de tribunal pour matcher l'index (cohérence avec loader)
+        from ..data.loader import normalize_tribunal
+        raw_tribunal = payload.get("tribunal", "")
+        tribunal = normalize_tribunal(raw_tribunal)
+        # Propage la version normalisée pour que les features one-hot soient cohérentes
+        payload = {**payload, "tribunal": tribunal}
+
         index = self._load_index()
         slug = index.get("tribunal_to_slug", {}).get(tribunal)
         used = "tribunal"

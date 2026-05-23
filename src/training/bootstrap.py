@@ -165,23 +165,37 @@ def _location_for(city: str, rng: np.random.Generator) -> tuple[float, str, floa
 
 
 def _generate_description(rng, property_type, has_balcony, has_parking, has_elevator,
-                           is_renovated, is_rented, floor, dpe):
+                           is_renovated, is_rented, floor, dpe,
+                           is_haussmannien, has_cheminee, has_bureau, has_dressing, has_cellar):
     """Génère une description plausible incluant les mots-clés cibles."""
     parts = [f"{property_type.lower()}"]
+    if is_haussmannien:
+        parts.append(rng.choice(["haussmannien", "pierre de taille", "avec moulures"]))
     if floor == 0:
         parts.append("au rez-de-chaussée")
     elif floor > 0:
         parts.append(f"au {floor}e étage")
     if has_elevator:
         parts.append("avec ascenseur")
+    rooms_details = []
+    if has_cheminee:
+        rooms_details.append("salon avec cheminée")
+    if has_bureau:
+        rooms_details.append("bureau")
+    if has_dressing:
+        rooms_details.append("dressing")
+    if rooms_details:
+        parts.append("comprenant " + ", ".join(rooms_details))
     if has_balcony:
         parts.append("avec balcon")
     if has_parking:
         parts.append(rng.choice(["et parking", "avec garage", "et box"]))
+    if has_cellar:
+        parts.append("avec cave")
     if is_renovated:
         parts.append(rng.choice(["entièrement rénové", "refait à neuf", "moderne"]))
     if is_rented:
-        parts.append(rng.choice(["loué", "occupé par un locataire", "avec bail en cours"]))
+        parts.append(rng.choice(["loué", "occupé par un locataire", "occupé", "avec bail en cours"]))
     if dpe:
         parts.append(f"DPE {dpe}")
     return " ".join(parts) + "."
@@ -214,18 +228,30 @@ def generate(n_rows: int = 5000, seed: int = 42) -> pd.DataFrame:
         has_elevator = int(rng.random() < 0.5)
         is_renovated = int(rng.random() < 0.25)
         is_rented = int(rng.random() < 0.25)
-        floor = int(rng.integers(-1, 8))  # -1 = inconnu, 0=RDC, 1-7
+        floor = int(rng.integers(-1, 8))
         dpe = rng.choice(["A", "B", "C", "D", "E", "F", "G", ""], p=[0.05,0.08,0.15,0.2,0.2,0.15,0.07,0.1])
 
+        # v4 — standing/haussmannien (plus fréquent à Paris/Lyon premium)
+        h_prob = 0.40 if (city == "Paris" and arr in {1,2,3,4,5,6,7,8,16,17}) else \
+                 0.20 if city in ("Paris","Lyon") else 0.05
+        is_haussmannien = int(rng.random() < h_prob)
+        has_cheminee = int(rng.random() < (0.45 if is_haussmannien else 0.15))
+        has_bureau = int(rng.random() < (0.30 if is_haussmannien else 0.10))
+        has_dressing = int(rng.random() < (0.35 if is_haussmannien else 0.12))
+        has_cellar = int(rng.random() < 0.55)
+
         # Multiplicateurs (effets typiques marché immobilier français)
-        # Sources d'inspiration : études MeilleursAgents 2024
         quality_mult = 1.0
         quality_mult *= (1.06 if has_balcony else 1.0)
         quality_mult *= (1.07 if has_parking else 1.0)
         quality_mult *= (1.05 if has_elevator else 1.0)
         quality_mult *= (1.10 if is_renovated else 1.0)
-        quality_mult *= (0.85 if is_rented else 1.0)  # bien occupé = décote ~15%
-        # Étage : 0 = RDC -5%, 1-3 neutre, 4+ +3%
+        quality_mult *= (0.85 if is_rented else 1.0)  # occupé = décote ~15%
+        quality_mult *= (1.15 if is_haussmannien else 1.0)  # premium standing
+        quality_mult *= (1.04 if has_cheminee else 1.0)
+        quality_mult *= (1.03 if has_dressing else 1.0)
+        quality_mult *= (1.02 if has_cellar else 1.0)
+        # Étage
         if floor == 0:
             quality_mult *= 0.95
         elif floor >= 4:
@@ -247,7 +273,8 @@ def generate(n_rows: int = 5000, seed: int = 42) -> pd.DataFrame:
 
         description = _generate_description(
             rng, property_type, has_balcony, has_parking, has_elevator,
-            is_renovated, is_rented, floor, dpe
+            is_renovated, is_rented, floor, dpe,
+            is_haussmannien, has_cheminee, has_bureau, has_dressing, has_cellar,
         )
 
         # Simule le cas du user : 30% des lignes ont postal_code tronqué à 2 digits
