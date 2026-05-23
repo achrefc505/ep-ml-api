@@ -34,13 +34,25 @@ class PredictRequest(BaseModel):
     adjudication_date: Optional[date] = Field(None, description="Date prévue de la vente")
 
     # Localisation fine (v2) — CRITIQUE pour Paris/Lyon/Marseille
+    # v3 : même si postal_code est partiel ('75'), on extrait l'arrondissement depuis city
+    #      (ex: city='Paris 16e' suffit)
     postal_code: Optional[str] = Field(
-        None, description="Code postal (ex: '75011'). Discrimine fortement les prix intra-ville."
+        None,
+        description="Code postal ('75011' idéal). Si partiel ('75'), l'arrondissement sera extrait depuis 'city' (ex: 'Paris 16e').",
     )
     latitude: Optional[float] = Field(None, ge=-90, le=90)
     longitude: Optional[float] = Field(None, ge=-180, le=180)
     address: Optional[str] = Field(
         None, description="Adresse complète (informatif, peut servir au géocodage côté serveur si lat/lng absents)"
+    )
+
+    # v3 — features quali extraites du texte
+    description: Optional[str] = Field(
+        None,
+        description="Description libre du bien (DPE, étage, balcon, parking, ascenseur, rénovation, locataire en place... sont extraits par regex).",
+    )
+    floor: Optional[str] = Field(
+        None, description="Étage ('RDC', '3', '5e étage'...)"
     )
 
 

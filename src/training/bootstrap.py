@@ -164,6 +164,29 @@ def _location_for(city: str, rng: np.random.Generator) -> tuple[float, str, floa
     return 1.0, f"{pc_base:05d}", lat, lng, 0
 
 
+def _generate_description(rng, property_type, has_balcony, has_parking, has_elevator,
+                           is_renovated, is_rented, floor, dpe):
+    """Génère une description plausible incluant les mots-clés cibles."""
+    parts = [f"{property_type.lower()}"]
+    if floor == 0:
+        parts.append("au rez-de-chaussée")
+    elif floor > 0:
+        parts.append(f"au {floor}e étage")
+    if has_elevator:
+        parts.append("avec ascenseur")
+    if has_balcony:
+        parts.append("avec balcon")
+    if has_parking:
+        parts.append(rng.choice(["et parking", "avec garage", "et box"]))
+    if is_renovated:
+        parts.append(rng.choice(["entièrement rénové", "refait à neuf", "moderne"]))
+    if is_rented:
+        parts.append(rng.choice(["loué", "occupé par un locataire", "avec bail en cours"]))
+    if dpe:
+        parts.append(f"DPE {dpe}")
+    return " ".join(parts) + "."
+
+
 def generate(n_rows: int = 5000, seed: int = 42) -> pd.DataFrame:
     rng = np.random.default_rng(seed)
     tribunals = list(TRIBUNAL_PROFILES.keys())
@@ -177,7 +200,6 @@ def generate(n_rows: int = 5000, seed: int = 42) -> pd.DataFrame:
         tribunal = rng.choice(tribunals)
         base_ppsqm, sigma_rel, region, city = TRIBUNAL_PROFILES[tribunal]
 
-        # ← localisation fine
         loc_mult, postal_code, lat, lng, arr = _location_for(city, rng)
 
         property_type = rng.choice(properties, p=PROPERTY_WEIGHTS)
@@ -186,8 +208,33 @@ def generate(n_rows: int = 5000, seed: int = 42) -> pd.DataFrame:
         surface = max(8.0, float(rng.normal(surf_mean, surf_std)))
         rooms = max(0, int(rng.normal(rooms_med, 1)))
 
-        # Prix marché ajusté par arrondissement → C'EST LA NOUVEAUTÉ
-        effective_ppsqm = base_ppsqm * loc_mult
+        # Features quali synthétiques avec un effet sur le prix
+        has_balcony = int(rng.random() < 0.3)
+        has_parking = int(rng.random() < 0.35)
+        has_elevator = int(rng.random() < 0.5)
+        is_renovated = int(rng.random() < 0.25)
+        is_rented = int(rng.random() < 0.25)
+        floor = int(rng.integers(-1, 8))  # -1 = inconnu, 0=RDC, 1-7
+        dpe = rng.choice(["A", "B", "C", "D", "E", "F", "G", ""], p=[0.05,0.08,0.15,0.2,0.2,0.15,0.07,0.1])
+
+        # Multiplicateurs (effets typiques marché immobilier français)
+        # Sources d'inspiration : études MeilleursAgents 2024
+        quality_mult = 1.0
+        quality_mult *= (1.06 if has_balcony else 1.0)
+        quality_mult *= (1.07 if has_parking else 1.0)
+        quality_mult *= (1.05 if has_elevator else 1.0)
+        quality_mult *= (1.10 if is_renovated else 1.0)
+        quality_mult *= (0.85 if is_rented else 1.0)  # bien occupé = décote ~15%
+        # Étage : 0 = RDC -5%, 1-3 neutre, 4+ +3%
+        if floor == 0:
+            quality_mult *= 0.95
+        elif floor >= 4:
+            quality_mult *= 1.03
+        # DPE
+        dpe_mult = {"A": 1.10, "B": 1.07, "C": 1.03, "D": 1.0, "E": 0.97, "F": 0.92, "G": 0.85, "": 1.0}
+        quality_mult *= dpe_mult[dpe]
+
+        effective_ppsqm = base_ppsqm * loc_mult * quality_mult
         market_value = surface * effective_ppsqm * float(rng.normal(1.0, sigma_rel))
 
         adjudicated = market_value * adj_ratio * float(rng.normal(1.0, 0.10))
@@ -198,9 +245,25 @@ def generate(n_rows: int = 5000, seed: int = 42) -> pd.DataFrame:
 
         adj_date = today - timedelta(days=int(rng.integers(0, horizon_days)))
 
+        description = _generate_description(
+            rng, property_type, has_balcony, has_parking, has_elevator,
+            is_renovated, is_rented, floor, dpe
+        )
+
+        # Simule le cas du user : 30% des lignes ont postal_code tronqué à 2 digits
+        # (mais city contient '11e' pour qu'on puisse reconstruire)
+        if city in ("Paris", "Lyon", "Marseille") and rng.random() < 0.30:
+            short_postal = postal_code[:2]
+            display_city = f"{city} {arr}e"
+            stored_postal = short_postal
+            stored_city = display_city
+        else:
+            stored_postal = postal_code
+            stored_city = city
+
         rows.append({
             "tribunal": tribunal,
-            "city": city,
+            "city": stored_city,
             "region": region,
             "property_type": property_type,
             "surface": round(surface, 2),
@@ -208,9 +271,11 @@ def generate(n_rows: int = 5000, seed: int = 42) -> pd.DataFrame:
             "initial_price": round(initial, 2),
             "adjudicated_price": round(adjudicated, 2),
             "adjudication_date": adj_date,
-            "postal_code": postal_code,
+            "postal_code": stored_postal,
             "latitude": round(lat, 6),
             "longitude": round(lng, 6),
+            "description": description,
+            "floor": str(floor) if floor >= 0 else None,
         })
 
     return pd.DataFrame(rows)

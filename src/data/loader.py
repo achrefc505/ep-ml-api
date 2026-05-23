@@ -84,7 +84,8 @@ def _load_from_sql() -> pd.DataFrame:
         SELECT
             tribunal, city, region, property_type,
             surface, rooms, initial_price, adjudicated_price,
-            adjudication_date, postal_code
+            adjudication_date, postal_code, [address], floor,
+            [description], latitude, longitude
         FROM dbo.adjudications
         WHERE adjudicated_price IS NOT NULL
           AND initial_price     IS NOT NULL
